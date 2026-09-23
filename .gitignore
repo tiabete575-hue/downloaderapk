@@ -9,6 +9,7 @@ lerna-debug.log*
 
 node_modules
 .pnpm-store/
+public/apk/parts/
 dist
 dist-ssr
 .output

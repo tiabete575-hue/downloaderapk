@@ -22,3 +22,12 @@ cd <repository-name>
 npm i
 npm run dev
 ```
+
+## Publicação na Cloudflare
+
+O comando de deploy é `npx wrangler deploy`. A configuração em `wrangler.jsonc`
+executa o build e publica o site como um Cloudflare Worker com arquivos estáticos.
+Para atualizar os aplicativos, substitua `apks/ultra.apk` ou `apks/musica.apk`
+e envie o commit ao GitHub. O build cria automaticamente partes menores que o
+limite de 25 MiB por arquivo da Cloudflare; os botões continuam baixando um
+único APK completo pelos endereços `/apk/ultra.apk` e `/apk/musica.apk`.
