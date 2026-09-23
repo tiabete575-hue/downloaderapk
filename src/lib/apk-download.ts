@@ -43,53 +43,31 @@ export function handleApkDownload(request: Request, environment: unknown): Respo
 
   if (request.method === "HEAD") return new Response(null, { headers });
 
-  let partIndex = 0;
-  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-  const body = new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      while (true) {
-        if (!reader) {
-          if (partIndex === apk.parts.length) {
-            controller.close();
-            return;
-          }
-
-          const part = apk.parts[partIndex];
-          if (!part) throw new Error("Parte do APK ausente do manifesto");
-          const partUrl = new URL(part.path, request.url);
-          const response = await assets.fetch(new Request(partUrl));
-          if (!response.ok || !response.body) {
-            throw new Error(`Falha ao carregar ${part.path}: ${response.status}`);
-          }
-          reader = response.body.getReader();
-        }
-
-        const result = await reader.read();
-        if (result.done) {
-          reader = null;
-          partIndex += 1;
-          continue;
-        }
-
-        controller.enqueue(result.value);
-        return;
-      }
-    },
-    async cancel() {
-      await reader?.cancel();
-    },
-  });
-
   const FixedLengthStream = (globalThis as typeof globalThis & {
     FixedLengthStream?: FixedLengthStreamConstructor;
   }).FixedLengthStream;
-  if (FixedLengthStream) {
-    const fixed = new FixedLengthStream(apk.size);
-    void body.pipeTo(fixed.writable).catch((error) => console.error(error));
-    return new Response(fixed.readable, { headers });
-  }
+  const stream = FixedLengthStream
+    ? new FixedLengthStream(apk.size)
+    : new TransformStream<Uint8Array, Uint8Array>();
 
-  // Fora do runtime Cloudflare, a resposta usa transferência em blocos.
-  headers.delete("Content-Length");
-  return new Response(body, { headers });
+  // pipeTo copia cada parte pelo runtime de Streams, sem processar cada bloco
+  // em JavaScript. Isso evita esgotar o tempo de CPU durante downloads grandes.
+  void (async () => {
+    try {
+      for (const part of apk.parts) {
+        const response = await assets.fetch(new Request(new URL(part.path, request.url)));
+        if (!response.ok || !response.body) {
+          throw new Error(`Falha ao carregar ${part.path}: ${response.status}`);
+        }
+        await response.body.pipeTo(stream.writable, { preventClose: true, preventAbort: true });
+      }
+      await stream.writable.getWriter().close();
+    } catch (error) {
+      console.error(error);
+      await stream.writable.abort(error);
+    }
+  })();
+
+  if (!FixedLengthStream) headers.delete("Content-Length");
+  return new Response(stream.readable, { headers });
 }
